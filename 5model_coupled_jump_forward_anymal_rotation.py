@@ -96,19 +96,21 @@ class MotionPlanner:
         self.NU = self.N
         # self.dt = self.T/self.N
         # side jump: 1.05
+        x_default = 0.348
+        y_default = 0.215
         self.r_init = np.array([0.0, 0.0, 0.46])
         self.r_final = np.array([0.0, 0.0, 0.46])
         self.q_init = np.array([0,0,0,1])
-        self.q_final = tf.quaternion_from_euler(0, 0, np.pi/6)
+        self.q_final = tf.quaternion_from_euler(0, 0, np.pi/3)
         R = self.quaternion_to_rotation_matrix(self.q_final)
-        self.p_left_front_init = np.array([0.2655, 0.135, 0.0])
-        self.p_right_front_init = np.array([0.2655, -0.135, 0.0])
-        self.p_left_rear_init = np.array([-0.2655, 0.135, 0.0])
-        self.p_right_rear_init = np.array([-0.2655, -0.135, 0.0])
-        self.p_left_front_final = R@np.array([0.2655, 0.135, 0.0])
-        self.p_right_front_final = R@np.array([0.2655, -0.135, 0.0])
-        self.p_left_rear_final = R@np.array([-0.2655, 0.135, 0.0])
-        self.p_right_rear_final = R@np.array([-0.2655, -0.135, 0.0])
+        self.p_left_front_init = np.array([x_default, y_default, 0.0])
+        self.p_right_front_init = np.array([x_default, -y_default, 0.0])
+        self.p_left_rear_init = np.array([-x_default, y_default, 0.0])
+        self.p_right_rear_init = np.array([-x_default, -y_default, 0.0])
+        self.p_left_front_final = R@np.array([x_default, y_default, 0.0])
+        self.p_right_front_final = R@np.array([x_default, -y_default, 0.0])
+        self.p_left_rear_final = R@np.array([-x_default, y_default, 0.0])
+        self.p_right_rear_final = R@np.array([-x_default, -y_default, 0.0])
         self.u_s = 0.7 # friction coefficient
 
         # Optimization solver
@@ -179,7 +181,7 @@ class MotionPlanner:
         # costs = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(self.rd) \
         #         + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(f5.T)) + sumsqr(diff(f6.T)) + sumsqr(diff(f7.T)) + sumsqr(diff(f8.T)) \
         #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
-        q_fin_cost = sumsqr(self.q[:, -1] - self.q_final) + sumsqr(self.qd[:, -1])
+        q_fin_cost = sumsqr(self.q[:, (self.N1+self.N2):] - self.q_final) + sumsqr(self.qd[:, -1])
         effort_cost = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(self.rd) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) \
                 + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
                 + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T))
@@ -621,13 +623,19 @@ class MotionPlanner:
                 sample_phase[i] = 0
                 # elif 2.0 < v < 3.0:
                 #     sample_phase[i] = 0
-        fig, axs = plt.subplots(2, 2)
-        # axs = fig.gca(projection='3d')
-        axs[0][0].plot(sample_COM.T)
-        axs[0][0].plot(sample_phase.T)
-        axs[0][0].legend(['rx', 'ry', 'rz'])
-        axs[0][1].plot(dt_plot)
-        axs[0][1].legend(['dt'])
+        # fig, axs = plt.subplots(2, 2)
+        # # axs = fig.gca(projection='3d')
+        # axs[0][0].plot(sample_COM.T)
+        # axs[0][0].plot(sample_phase.T)
+        # axs[0][0].legend(['rx', 'ry', 'rz'])
+        # axs[0][1].plot(dt_plot)
+        # axs[0][1].legend(['dt'])
+
+        plt.plot(sample_comqx)
+        plt.plot(sample_comqy)
+        plt.plot(sample_comqz)
+        plt.plot(sample_comqw)
+        plt.show()
 
         np.savez('/home/robin/Documents/anymal_ctrl_edin_gaits/src/anymal_control_msg_publisher/scripts/data_test_rotate.npz',
             lfront=sample_lfrontFOOT, rfront=sample_rfrontFOOT, lrear=sample_lrearFOOT, \
@@ -652,8 +660,8 @@ class MotionPlanner:
         axs[0][0].legend(['rx', 'ry', 'rz'])
 
         axs[0][1].plot(dt_plot, q.T)
-        axs[0][1].plot(np.linalg.norm(q, axis=0))
-        axs[0][1].legend(['qx', 'qy', 'qz', 'qw', 'norm'])
+        # axs[0][1].plot(np.linalg.norm(q, axis=0))
+        axs[0][1].legend(['qx', 'qy', 'qz', 'qw'])
 
         axs[1][0].plot(dt_plot, H.T)
         axs[1][0].legend(['Hx', 'Hy', 'Hz'])
@@ -721,7 +729,23 @@ class MotionPlanner:
         ax.set_ylim3d([-0.5, 0.5])
         ax.set_zlim3d([-0.05, 1.0])
         # ax.set_aspect('equal')
+        # ax.plot3D(p1[0,0].T, p1[1,0].T, p1[2,0].T, 'ro')
+        p1_value_x = [p1[0,0],p2[0,0]]
+        p1_value_y = [p1[1,0],p2[1,0]]
+        p1_value_z = [p1[2,0],p2[2,0]]
+        p2_value_x = [p2[0,0],p3[0,0]]
+        p2_value_y = [p2[1,0],p3[1,0]]
+        p2_value_z = [p2[2,0],p3[2,0]]
+        p3_value_x = [p3[0,0],p4[0,0]]
+        p3_value_y = [p3[1,0],p4[1,0]]
+        p3_value_z = [p3[2,0],p4[2,0]]
+        ax.plot(p1_value_x, p1_value_y, p1_value_z)
+        ax.plot(p2_value_x, p2_value_y, p2_value_z)
+        ax.plot(p3_value_x, p3_value_y, p3_value_z)
         ax.plot3D(p1[0,:].T, p1[1,:].T, p1[2,:].T, 'gray')
+        ax.plot3D(p2[0,:].T, p2[1,:].T, p2[2,:].T, 'gray')
+        ax.plot3D(p3[0,:].T, p3[1,:].T, p3[2,:].T, 'gray')
+        ax.plot3D(p4[0,:].T, p4[1,:].T, p4[2,:].T, 'gray')
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_zlabel('z')

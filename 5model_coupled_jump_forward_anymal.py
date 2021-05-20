@@ -87,10 +87,10 @@ class MotionPlanner:
         # define parameters
         self.T = T
         # jump forward with 0.1m, N1=N2=N3=20, tmin=0.02, tmax=0.15
-        # jump hopping: N1=N2=N3=15 , tmin=0.02, tmax=0.15
-        self.N1 = 25
+        # jump hopping: N1=25 N2=12 N3=25 , tmin=0.02, tmax=0.15
+        self.N1 = 15
         self.N2 = 12
-        self.N3 = 25
+        self.N3 = 12
         self.N_array = np.array([self.N1, self.N2, self.N3])
         # dt = 0.05
         self.N = self.N1 + self.N2 + self.N3
@@ -98,19 +98,19 @@ class MotionPlanner:
         self.NU = self.N
         # self.dt = self.T/self.N
         # side jump: 1.05
-        self.forward_dist = 0.0
+        self.final_offset = np.array([0.0, 0.0, 0.0])
         self.r_init = np.array([0.0, 0.0, 0.46])
-        self.r_final = np.array([0.0+self.forward_dist, 0.0, 0.46])
+        self.r_final = np.array([0.0, 0.0, 0.46]) + self.final_offset
         x_default = 0.348
         y_default = 0.215
         self.p_left_front_init = np.array([x_default, y_default, 0.0])
         self.p_right_front_init = np.array([x_default, -y_default, 0.0])
         self.p_left_rear_init = np.array([-x_default, y_default, 0.0])
         self.p_right_rear_init = np.array([-x_default, -y_default, 0.0])
-        self.p_left_front_final = np.array([x_default+self.forward_dist, y_default, 0.0])
-        self.p_right_front_final = np.array([x_default+self.forward_dist, -y_default, 0.0])
-        self.p_left_rear_final = np.array([-x_default+self.forward_dist, y_default, 0.0])
-        self.p_right_rear_final = np.array([-x_default+self.forward_dist, -y_default, 0.0])
+        self.p_left_front_final = np.array([x_default, y_default, 0.0]) + self.final_offset
+        self.p_right_front_final = np.array([x_default, -y_default, 0.0]) + self.final_offset
+        self.p_left_rear_final = np.array([-x_default, y_default, 0.0]) + self.final_offset
+        self.p_right_rear_final = np.array([-x_default, -y_default, 0.0]) + self.final_offset
         self.u_s = 0.7 # friction coefficient
 
         # Optimization solver
@@ -642,7 +642,7 @@ class MotionPlanner:
         axs[0][1].plot(dt_plot)
         axs[0][1].legend(['dt'])
 
-        np.savez('/home/robin/Documents/anymal_ctrl_edin_gaits/src/anymal_control_msg_publisher/scripts/data_test.npz',
+        np.savez('/home/robin/Documents/anymal_ctrl_edin_gaits/src/anymal_control_msg_publisher/scripts/data_test_side.npz',
             lfront=sample_lfrontFOOT, rfront=sample_rfrontFOOT, lrear=sample_lrearFOOT, \
             rrear=sample_rrearFOOT, lfront_vel=sample_lfrontFOOT_vel, rfront_vel=sample_rfrontFOOT_vel, lrear_vel=sample_lrearFOOT_vel, \
             rrear_vel=sample_rrearFOOT_vel, lfront_acc=sample_lfrontFOOT_acc, rfront_acc=sample_rfrontFOOT_acc, lrear_acc=sample_lrearFOOT_acc, \
