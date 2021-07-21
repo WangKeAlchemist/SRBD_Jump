@@ -11,15 +11,14 @@ from scipy.interpolate import interp1d
 # 1, set initial for states for warm start, like x and f
 # 2, add more constrains
 class SingleRigidBodyModel:
-    def __init__(self, mass=31.82, g=(0, 0, -9.81)):
+    def __init__(self, mass=1.0, g=(0, 0, -9.81)):
         self.mass = mass
         self.g = np.array(g)
-        self.I_body = np.array([[1.09934, -0.00138895, 0.0095396],[-0.00138895, 2.20387, -6.77755e-05],[0.0095396,-6.77755e-05, 2.12671]])
+
+        self.I_body = np.array([[0.00528, -0.0013, 0.00],[-0.00000138, 0.00528, -6.77755e-05],[0.000095,-6.77755e-05, 0.010416]])
         self.I_body_inv = np.linalg.inv(self.I_body)
-        self.foot_width = 0.1
-        self.foot_length = 0.16
-        self.l_min = 0.3### Swing phase in the air for trajectory
-        self.l_max = 0.8
+        self.l_min = 0.10### Swing phase in the air for trajectory
+        self.l_max = 0.25
 
     def simple_dynamics(self, r, q, H, L, f, p):
         rd = H / self.mass
@@ -86,31 +85,30 @@ class MotionPlanner:
         # define parameters
         self.T = T
         # jump forward with 0.1m, N1=N2=N3=20, tmin=0.02, tmax=0.15
-        # jump hopping: N1=N2=N3=15 , tmin=0.02, tmax=0.15
+        # jump hopping: N1=25 N2=12 N3=25 , tmin=0.02, tmax=0.15
         self.N1 = 15
         self.N2 = 15
-        self.N3 = 20
+        self.N3 = 15
         self.N_array = np.array([self.N1, self.N2, self.N3])
+        # dt = 0.05
         self.N = self.N1 + self.N2 + self.N3
         self.NX = self.N + 1
         self.NU = self.N
         # self.dt = self.T/self.N
         # side jump: 1.05
-        x_default = 0.348
-        y_default = 0.215
-        self.r_init = np.array([0.0, 0.0, 0.468])
-        self.r_final = np.array([0.0, 0.0, 0.468])
-        self.q_init = np.array([0,0,0,1])
-        self.q_final = tf.quaternion_from_euler(0, 0, np.pi/6)
-        R = self.quaternion_to_rotation_matrix(self.q_final)
+        self.final_offset = np.array([0.0, 0.0, 0.0])
+        self.r_init = np.array([0.0, 0.0, 0.2062])
+        self.r_final = np.array([0.0, 0.0, 0.2062]) + self.final_offset
+        x_default = 0.075
+        y_default = 0.050
         self.p_left_front_init = np.array([x_default, y_default, 0.0])
         self.p_right_front_init = np.array([x_default, -y_default, 0.0])
         self.p_left_rear_init = np.array([-x_default, y_default, 0.0])
         self.p_right_rear_init = np.array([-x_default, -y_default, 0.0])
-        self.p_left_front_final = R@np.array([x_default, y_default, 0.0])
-        self.p_right_front_final = R@np.array([x_default, -y_default, 0.0])
-        self.p_left_rear_final = R@np.array([-x_default, y_default, 0.0])
-        self.p_right_rear_final = R@np.array([-x_default, -y_default, 0.0])
+        self.p_left_front_final = np.array([x_default, y_default, 0.0]) + self.final_offset
+        self.p_right_front_final = np.array([x_default, -y_default, 0.0]) + self.final_offset
+        self.p_left_rear_final = np.array([-x_default, y_default, 0.0]) + self.final_offset
+        self.p_right_rear_final = np.array([-x_default, -y_default, 0.0]) + self.final_offset
         self.u_s = 0.7 # friction coefficient
 
         # Optimization solver
@@ -181,11 +179,11 @@ class MotionPlanner:
         # costs = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(self.rd) \
         #         + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(f5.T)) + sumsqr(diff(f6.T)) + sumsqr(diff(f7.T)) + sumsqr(diff(f8.T)) \
         #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
-        q_fin_cost = sumsqr(self.q[:, (self.N1+self.N2):] - self.q_final) + sumsqr(self.qd[:, -1])
+        # q_fin_cost = sumsqr(self.q[:, -1] - self.q_final)
         effort_cost = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(self.rd) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) \
                 + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
                 + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T))
-        self.opti.minimize(1e-5*effort_cost+q_fin_cost)
+        self.opti.minimize(effort_cost)
 
         # dynamic constraints
         for i in range(3):
@@ -208,8 +206,8 @@ class MotionPlanner:
             self.opti.subject_to(sumsqr(self.q[:, k]) >= 0.99)
             self.opti.subject_to(sumsqr(self.q[:, k]) <= 1.01)
         for j in range(3):
-            self.opti.subject_to(self.dt[j] >= 0.02)
-            self.opti.subject_to(self.dt[j] <= 0.15)
+            self.opti.subject_to(self.dt[j] >= 0.025)
+            self.opti.subject_to(self.dt[j] <= 0.20)
 
         # constraints on contact positions
         for k in range(self.N):
@@ -227,14 +225,14 @@ class MotionPlanner:
             self.opti.subject_to(p_right_front[:,self.N1+self.N2-1] == p_right_front[:,self.N1+self.N2])
             self.opti.subject_to(p_right_rear[:,self.N1+self.N2-1] == p_right_rear[:,self.N1+self.N2])
             # kinematic constraint
-            self.opti.subject_to(0.31 <= self.r[2, k] - p_left_front[2, k])
-            self.opti.subject_to(0.31 <= self.r[2, k] - p_left_rear[2, k])
-            self.opti.subject_to(0.31 <= self.r[2, k] - p_right_front[2, k])
-            self.opti.subject_to(0.31 <= self.r[2, k] - p_right_rear[2, k])
-            self.opti.subject_to(self.r[2, k] - p_left_front[2, k] <= 0.56)
-            self.opti.subject_to(self.r[2, k] - p_left_rear[2, k] <= 0.56)
-            self.opti.subject_to(self.r[2, k] - p_right_front[2, k] <= 0.56)
-            self.opti.subject_to(self.r[2, k] - p_right_rear[2, k] <= 0.56)
+            self.opti.subject_to(self.model.l_min <= self.r[2, k] - p_left_front[2, k])
+            self.opti.subject_to(self.model.l_min <= self.r[2, k] - p_left_rear[2, k])
+            self.opti.subject_to(self.model.l_min <= self.r[2, k] - p_right_front[2, k])
+            self.opti.subject_to(self.model.l_min <= self.r[2, k] - p_right_rear[2, k])
+            self.opti.subject_to(self.r[2, k] - p_left_front[2, k] <= self.model.l_max)
+            self.opti.subject_to(self.r[2, k] - p_left_rear[2, k] <= self.model.l_max)
+            self.opti.subject_to(self.r[2, k] - p_right_front[2, k] <= self.model.l_max)
+            self.opti.subject_to(self.r[2, k] - p_right_rear[2, k] <= self.model.l_max)
 
             # self.opti.subject_to(self.r[2, k] > 0.1)
             if k < self.N1:
@@ -380,8 +378,8 @@ class MotionPlanner:
                   solution.value(p_right_rear))
 
         self.trajectory_generation(solution.value(self.r),solution.value(self.rd), solution.value(self.q),solution.value(self.qd), solution.value(self.dt), solution.value(self.Hd),\
-                                solution.value(self.L), solution.value(self.Ld), solution.value(p_left_front), solution.value(p_right_front), solution.value(p_left_rear),\
-                                solution.value(p_right_rear), solution.value(f1), solution.value(f2), solution.value(f3), solution.value(f4), 400)
+                                solution.value(self.L), solution.value(self.Ld), solution.value(p_left_front), solution.value(p_right_front), solution.value(p_left_rear), \
+                                solution.value(p_right_rear), solution.value(f1), solution.value(f2), solution.value(f3), solution.value(f4), 240)
 
     def set_initial_solution(self):
         # dT_i = np.ones((1, 3)) * 0.025
@@ -392,13 +390,6 @@ class MotionPlanner:
         # self.opti.set_initial(self.dt, dT_i)
         self.opti.set_initial(self.r, r_i)
 
-    def quaternion_to_rotation_matrix(self, q):
-        qx, qy, qz, qw = q[0], q[1], q[2], q[3]
-        R = np.array([[1 - 2 * (qy ** 2 + qz ** 2), 2 * qx * qy - 2 * qw * qz, 2 * qw * qy + 2 * qx * qz],
-                      [2 * qx * qy + 2 * qw * qz, 1 - 2 * (qx ** 2 + qz ** 2), 2 * qy * qz - 2 * qw * qx],
-                      [2 * qx * qz - 2 * qw * qy, 2 * qw * qx + 2 * qy * qz, 1 - 2 * (qx ** 2 + qy ** 2)]])
-        return R
-
     def trajectory_generation(self, r, rd, q, qd, dt, Hd, L, Ld, p_left_front, p_right_front, p_left_rear, p_right_rear, f1,
                               f2, f3, f4, freq):
         dt_plot = np.ones(self.NU)
@@ -407,6 +398,7 @@ class MotionPlanner:
         dt_plot[self.N1:self.N1 + self.N2] *= dt[1]
         dt_plot[self.N1 + self.N2:] *= dt[2]
         dt_plot_interval = dt_plot
+
         for i in range(1, self.NX):
             dt_plot[i] += dt_plot[i - 1]
         dt_plot_control = dt_plot[1:]
@@ -414,23 +406,35 @@ class MotionPlanner:
         p_right_front = np.concatenate((p_right_front, np.reshape(self.p_right_front_final, (3, 1))), axis=1)
         p_left_rear = np.concatenate((p_left_rear, np.reshape(self.p_left_rear_final, (3, 1))), axis=1)
         p_right_rear = np.concatenate((p_right_rear, np.reshape(self.p_right_rear_final, (3, 1))), axis=1)
-        p_left_front_vel = np.diff(p_left_front)/(1/freq)
-        p_left_front_vel = np.hstack((p_left_front_vel, p_left_front_vel[:,-1].reshape(3,1)))
-        p_right_front_vel = np.diff(p_right_front)/(1/freq)
-        p_right_front_vel = np.hstack((p_right_front_vel, p_right_front_vel[:,-1].reshape(3,1)))
-        p_left_rear_vel = np.diff(p_left_rear)/(1/freq)
-        p_left_rear_vel = np.hstack((p_left_rear_vel, p_left_rear_vel[:,-1].reshape(3,1)))
-        p_right_rear_vel = np.diff(p_right_rear)/(1/freq)
-        p_right_rear_vel = np.hstack((p_right_rear_vel, p_right_rear_vel[:,-1].reshape(3,1)))
 
-        p_left_front_acc = np.diff(p_left_front_vel)/(1/freq)
-        p_left_front_acc = np.hstack((p_left_front_acc, p_left_front_acc[:,-1].reshape(3,1)))
-        p_right_front_acc = np.diff(p_right_front_vel)/(1/freq)
-        p_right_front_acc = np.hstack((p_right_front_acc, p_right_front_acc[:,-1].reshape(3,1)))
-        p_left_rear_acc = np.diff(p_left_rear_vel)/(1/freq)
-        p_left_rear_acc = np.hstack((p_left_rear_acc, p_left_rear_acc[:,-1].reshape(3,1)))
-        p_right_rear_acc = np.diff(p_right_rear_vel)/(1/freq)
-        p_right_rear_acc = np.hstack((p_right_rear_acc, p_right_rear_acc[:,-1].reshape(3,1)))
+        p_left_front_vel = np.zeros((3, self.NX))
+        p_right_front_vel = np.zeros((3, self.NX))
+        p_left_rear_vel = np.zeros((3, self.NX))
+        p_right_rear_vel = np.zeros((3, self.NX))
+        for i in range(1, self.NX):
+            p_left_front_vel[:,i-1] = (p_left_front[:,i]-p_left_front[:,i-1])/dt_plot_interval[i]
+            p_right_front_vel[:,i-1] = (p_right_front[:,i]-p_right_front[:,i-1])/dt_plot_interval[i]
+            p_left_rear_vel[:,i-1] = (p_left_rear[:,i]-p_left_rear[:,i-1])/dt_plot_interval[i]
+            p_right_rear_vel[:,i-1] = (p_right_rear[:,i]-p_right_rear[:,i-1])/dt_plot_interval[i]
+        p_left_front_vel[:,-1] = p_left_front_vel[:,-2]
+        p_right_front_vel[:,-1] = p_right_front_vel[:,-2]
+        p_left_rear_vel[:,-1] = p_left_rear_vel[:,-2]
+        p_right_rear_vel[:,-1] = p_right_rear_vel[:,-2]
+
+        p_left_front_acc = np.zeros((3, self.NX))
+        p_right_front_acc = np.zeros((3, self.NX))
+        p_left_rear_acc = np.zeros((3, self.NX))
+        p_right_rear_acc = np.zeros((3, self.NX))
+        for i in range(1, self.NX):
+            p_left_front_acc[:,i-1] = (p_left_front_vel[:,i]-p_left_front_vel[:,i-1])/dt_plot_interval[i]
+            p_right_front_acc[:,i-1] = (p_right_front_vel[:,i]-p_right_front_vel[:,i-1])/dt_plot_interval[i]
+            p_left_rear_acc[:,i-1] = (p_left_rear_vel[:,i]-p_left_rear_vel[:,i-1])/dt_plot_interval[i]
+            p_right_rear_acc[:,i-1] = (p_right_rear_vel[:,i]-p_right_rear_vel[:,i-1])/dt_plot_interval[i]
+        p_left_front_acc[:,-1] = p_left_front_acc[:,-2]
+        p_right_front_acc[:,-1] = p_right_front_acc[:,-2]
+        p_left_rear_acc[:,-1] = p_left_rear_acc[:,-2]
+        p_right_rear_acc[:,-1] = p_right_rear_acc[:,-2]
+
         f1 = np.concatenate((f1, np.reshape(f1[:, -1], (3, 1))), axis=1)
         f2 = np.concatenate((f2, np.reshape(f2[:, -1], (3, 1))), axis=1)
         f3 = np.concatenate((f3, np.reshape(f3[:, -1], (3, 1))), axis=1)
@@ -453,13 +457,13 @@ class MotionPlanner:
         comddx = interp1d(dt_plot, Hd[0, :] / self.model.mass, kind='linear')
         comddy = interp1d(dt_plot, Hd[1, :] / self.model.mass, kind='linear')
         comddz = interp1d(dt_plot, Hd[2, :] / self.model.mass, kind='linear')
-        comqx = interp1d(dt_plot, q[0,:], kind='linear')
-        comqy = interp1d(dt_plot, q[1,:], kind='linear')
-        comqz = interp1d(dt_plot, q[2,:], kind='linear')
-        comqw = interp1d(dt_plot, q[3,:], kind='linear')
-        comdqx = interp1d(dt_plot, qd[0,:], kind='linear')
-        comdqy = interp1d(dt_plot, qd[1,:], kind='linear')
-        comdqz = interp1d(dt_plot, qd[2,:], kind='linear')
+        comqx = interp1d(dt_plot, q[0,:], kind='cubic')
+        comqy = interp1d(dt_plot, q[1,:], kind='cubic')
+        comqz = interp1d(dt_plot, q[2,:], kind='cubic')
+        comqw = interp1d(dt_plot, q[3,:], kind='cubic')
+        comdqx = interp1d(dt_plot, qd[0,:], kind='quadratic')
+        comdqy = interp1d(dt_plot, qd[1,:], kind='quadratic')
+        comdqz = interp1d(dt_plot, qd[2,:], kind='quadratic')
         angx = interp1d(dt_plot, L[0, :] / self.model.mass, kind='linear')
         angy = interp1d(dt_plot, L[1, :] / self.model.mass, kind='linear')
         angz = interp1d(dt_plot, L[2, :] / self.model.mass, kind='linear')
@@ -593,8 +597,13 @@ class MotionPlanner:
         sample_f4z = f4z(sample_t)
         sample_phase = phase_t(sample_t)
         sample_COM = np.vstack((sample_comx, sample_comy, sample_comz))
+
         sample_dCOM = np.vstack((sample_comdx, sample_comdy, sample_comdz))
+
         sample_ddCOM = np.vstack((sample_comddx, sample_comddy, sample_comddz))
+
+        plt.plot(sample_comddz)
+        plt.show()
         sample_COM_ori = np.vstack((sample_comqx,sample_comqy,sample_comqz,sample_comqw))
         sample_qCOM_ori = np.vstack((sample_comdqx,sample_comdqy,sample_comdqz))
         sample_Ang = np.vstack((sample_angx, sample_angy, sample_angz))
@@ -623,21 +632,15 @@ class MotionPlanner:
                 sample_phase[i] = 0
                 # elif 2.0 < v < 3.0:
                 #     sample_phase[i] = 0
-        # fig, axs = plt.subplots(2, 2)
-        # # axs = fig.gca(projection='3d')
-        # axs[0][0].plot(sample_COM.T)
-        # axs[0][0].plot(sample_phase.T)
-        # axs[0][0].legend(['rx', 'ry', 'rz'])
-        # axs[0][1].plot(dt_plot)
-        # axs[0][1].legend(['dt'])
+        fig, axs = plt.subplots(2, 2)
+        # axs = fig.gca(projection='3d')
+        axs[0][0].plot(sample_COM.T)
+        axs[0][0].plot(sample_phase.T)
+        axs[0][0].legend(['rx', 'ry', 'rz'])
+        axs[0][1].plot(dt_plot)
+        axs[0][1].legend(['dt'])
 
-        plt.plot(sample_comqx)
-        plt.plot(sample_comqy)
-        plt.plot(sample_comqz)
-        plt.plot(sample_comqw)
-        plt.show()
-
-        np.savez('/home/robin/Documents/anymal_ctrl_edin_gaits/src/anymal_control_msg_publisher/scripts/data_test_rotate_30.npz',
+        np.savez('/home/robin/Documents/anymal_ctrl_edin_gaits/src/anymal_control_msg_publisher/scripts/data_jump_softFoot.npz',
             lfront=sample_lfrontFOOT, rfront=sample_rfrontFOOT, lrear=sample_lrearFOOT, \
             rrear=sample_rrearFOOT, lfront_vel=sample_lfrontFOOT_vel, rfront_vel=sample_rfrontFOOT_vel, lrear_vel=sample_lrearFOOT_vel, \
             rrear_vel=sample_rrearFOOT_vel, lfront_acc=sample_lfrontFOOT_acc, rfront_acc=sample_rfrontFOOT_acc, lrear_acc=sample_lrearFOOT_acc, \
@@ -660,8 +663,8 @@ class MotionPlanner:
         axs[0][0].legend(['rx', 'ry', 'rz'])
 
         axs[0][1].plot(dt_plot, q.T)
-        # axs[0][1].plot(np.linalg.norm(q, axis=0))
-        axs[0][1].legend(['qx', 'qy', 'qz', 'qw'])
+        axs[0][1].plot(np.linalg.norm(q, axis=0))
+        axs[0][1].legend(['qx', 'qy', 'qz', 'qw', 'norm'])
 
         axs[1][0].plot(dt_plot, H.T)
         axs[1][0].legend(['Hx', 'Hy', 'Hz'])
@@ -729,23 +732,7 @@ class MotionPlanner:
         ax.set_ylim3d([-0.5, 0.5])
         ax.set_zlim3d([-0.05, 1.0])
         # ax.set_aspect('equal')
-        # ax.plot3D(p1[0,0].T, p1[1,0].T, p1[2,0].T, 'ro')
-        p1_value_x = [p1[0,0],p2[0,0]]
-        p1_value_y = [p1[1,0],p2[1,0]]
-        p1_value_z = [p1[2,0],p2[2,0]]
-        p2_value_x = [p2[0,0],p3[0,0]]
-        p2_value_y = [p2[1,0],p3[1,0]]
-        p2_value_z = [p2[2,0],p3[2,0]]
-        p3_value_x = [p3[0,0],p4[0,0]]
-        p3_value_y = [p3[1,0],p4[1,0]]
-        p3_value_z = [p3[2,0],p4[2,0]]
-        ax.plot(p1_value_x, p1_value_y, p1_value_z)
-        ax.plot(p2_value_x, p2_value_y, p2_value_z)
-        ax.plot(p3_value_x, p3_value_y, p3_value_z)
         ax.plot3D(p1[0,:].T, p1[1,:].T, p1[2,:].T, 'gray')
-        ax.plot3D(p2[0,:].T, p2[1,:].T, p2[2,:].T, 'gray')
-        ax.plot3D(p3[0,:].T, p3[1,:].T, p3[2,:].T, 'gray')
-        ax.plot3D(p4[0,:].T, p4[1,:].T, p4[2,:].T, 'gray')
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_zlabel('z')

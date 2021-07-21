@@ -88,9 +88,9 @@ class MotionPlanner:
         self.T = T
         # jump forward with 0.1m, N1=N2=N3=20, tmin=0.02, tmax=0.15
         # jump hopping: N1=25 N2=12 N3=25 , tmin=0.02, tmax=0.15
-        self.N1 = 15
-        self.N2 = 12
-        self.N3 = 12
+        self.N1 = 75
+        self.N2 = 60
+        self.N3 = 75
         self.N_array = np.array([self.N1, self.N2, self.N3])
         # dt = 0.05
         self.N = self.N1 + self.N2 + self.N3
@@ -98,9 +98,10 @@ class MotionPlanner:
         self.NU = self.N
         # self.dt = self.T/self.N
         # side jump: 1.05
-        self.final_offset = np.array([0.0, 0.0, 0.0])
-        self.r_init = np.array([0.0, 0.0, 0.46])
-        self.r_final = np.array([0.0, 0.0, 0.46]) + self.final_offset
+        self.final_offset = np.array([0.1, 0.0, 0.0])
+        self.r_init = np.array([0.0, 0.0, 0.468])
+        self.r_final = np.array([0.0, 0.0, 0.468]) + self.final_offset
+        self.q_final = tf.quaternion_from_euler(0, 0, 0)
         x_default = 0.348
         y_default = 0.215
         self.p_left_front_init = np.array([x_default, y_default, 0.0])
@@ -181,11 +182,11 @@ class MotionPlanner:
         # costs = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(self.rd) \
         #         + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(f5.T)) + sumsqr(diff(f6.T)) + sumsqr(diff(f7.T)) + sumsqr(diff(f8.T)) \
         #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
-        # q_fin_cost = sumsqr(self.q[:, -1] - self.q_final)
+        q_fin_cost = 5*sumsqr(self.q[:, :] - self.q_final)
         effort_cost = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(self.rd) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) \
                 + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
                 + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T))
-        self.opti.minimize(effort_cost)
+        self.opti.minimize(effort_cost+q_fin_cost)
 
         # dynamic constraints
         for i in range(3):
@@ -208,8 +209,8 @@ class MotionPlanner:
             self.opti.subject_to(sumsqr(self.q[:, k]) >= 0.99)
             self.opti.subject_to(sumsqr(self.q[:, k]) <= 1.01)
         for j in range(3):
-            self.opti.subject_to(self.dt[j] >= 0.02)
-            self.opti.subject_to(self.dt[j] <= 0.15)
+            self.opti.subject_to(self.dt[j] >= 0.005)
+            self.opti.subject_to(self.dt[j] <= 0.05)
 
         # constraints on contact positions
         for k in range(self.N):
@@ -231,10 +232,10 @@ class MotionPlanner:
             self.opti.subject_to(0.31 <= self.r[2, k] - p_left_rear[2, k])
             self.opti.subject_to(0.31 <= self.r[2, k] - p_right_front[2, k])
             self.opti.subject_to(0.31 <= self.r[2, k] - p_right_rear[2, k])
-            self.opti.subject_to(self.r[2, k] - p_left_front[2, k] <= 0.52)
-            self.opti.subject_to(self.r[2, k] - p_left_rear[2, k] <= 0.52)
-            self.opti.subject_to(self.r[2, k] - p_right_front[2, k] <= 0.52)
-            self.opti.subject_to(self.r[2, k] - p_right_rear[2, k] <= 0.52)
+            self.opti.subject_to(self.r[2, k] - p_left_front[2, k] <= 0.50)
+            self.opti.subject_to(self.r[2, k] - p_left_rear[2, k] <= 0.50)
+            self.opti.subject_to(self.r[2, k] - p_right_front[2, k] <= 0.50)
+            self.opti.subject_to(self.r[2, k] - p_right_rear[2, k] <= 0.50)
 
             # self.opti.subject_to(self.r[2, k] > 0.1)
             if k < self.N1:
@@ -642,7 +643,7 @@ class MotionPlanner:
         axs[0][1].plot(dt_plot)
         axs[0][1].legend(['dt'])
 
-        np.savez('/home/robin/Documents/anymal_ctrl_edin_gaits/src/anymal_control_msg_publisher/scripts/data_test_side.npz',
+        np.savez('/home/robin/Documents/anymal_msg_publisher/src/anymal_control_msg_publisher/scripts/data_test_forward.npz',
             lfront=sample_lfrontFOOT, rfront=sample_rfrontFOOT, lrear=sample_lrearFOOT, \
             rrear=sample_rrearFOOT, lfront_vel=sample_lfrontFOOT_vel, rfront_vel=sample_rfrontFOOT_vel, lrear_vel=sample_lrearFOOT_vel, \
             rrear_vel=sample_rrearFOOT_vel, lfront_acc=sample_lfrontFOOT_acc, rfront_acc=sample_rfrontFOOT_acc, lrear_acc=sample_lrearFOOT_acc, \
