@@ -8,6 +8,22 @@ from utils.transformations import euler_from_quaternion
 from mpl_toolkits import mplot3d
 from scipy.interpolate import interp1d
 
+def angular_vel_quaterion_derivative(q,qd):
+    qx, qy, qz, qw = q[0], q[1], q[2], q[3]
+    qdx, qdy, qdz, qdw = qd[0], qd[1], qd[2], qd[3]
+    wx = 2*(qw*qdx - qx*qdw - qy*qdz + qz*qdy)
+    wy = 2*(qw*qdy + qx*qdz - qy*qdw - qz*qdx)
+    wz = 2*(qw*qdz - qx*qdy + qy*qdx -qz*qdw)
+    return blockcat([[wx, wy, wz]])
+
+def angular_vel_quaterion_derivative_numerical(q,qd):
+    qx, qy, qz, qw = q[0], q[1], q[2], q[3]
+    qdx, qdy, qdz, qdw = qd[0], qd[1], qd[2], qd[3]
+    wx = 2*(qw*qdx - qx*qdw - qy*qdz + qz*qdy)
+    wy = 2*(qw*qdy + qx*qdz - qy*qdw - qz*qdx)
+    wz = 2*(qw*qdz - qx*qdy + qy*qdx -qz*qdw)
+    return np.array([wx, wy, wz])
+
 class SingleRigidBodyModel:
     def __init__(self, mass=35.65, g=(0, 0, -9.81)):
         self.mass = mass
@@ -103,8 +119,8 @@ class MotionPlanner:
         self.T = T
         # jump forward with 0.1m, N1=N2=N3=20, tmin=0.02, tmax=0.15
         # jump hopping: N1=N2=N3=15 , tmin=0.02, tmax=0.15
-        self.N1 = 15
-        self.N2 = 15
+        self.N1 = 20
+        self.N2 = 20
         self.N3 = 20
         self.N_array = np.array([self.N1, self.N2, self.N3])
         self.N = self.N1 + self.N2 + self.N3
@@ -190,20 +206,6 @@ class MotionPlanner:
                 p3_guess[:,i] = p3_final
                 p4_guess[:,i] = p4_final
 
-        # Optimization costs
-        # unit_quaternion_cost = 0
-        # for k in range(self.N):
-        #     unit_quaternion_cost += sumsqr(q[:, k])-1
-        # costs = sumsqr(f)
-        # costs = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(self.rd) \
-        #         + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(f5.T)) + sumsqr(diff(f6.T)) + sumsqr(diff(f7.T)) + sumsqr(diff(f8.T)) \
-        #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
-        q_fin_cost = 10*sumsqr(self.q[:, (self.N1+self.N2):] - self.q_final) + sumsqr(self.qd[:, -1])
-        effort_cost = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + sumsqr(self.H) + 1*sumsqr(self.L) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) \
-                + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + 100*(sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
-                + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T)))#+ 10*sumsqr(self.qd) ## sumsqr(self.r) + sumsqr(self.rd) +
-        self.opti.minimize(1e-4*effort_cost+q_fin_cost)
-
         # dynamic constraints
         for i in range(3):
             for j in range(self.N_array[i]):
@@ -213,7 +215,7 @@ class MotionPlanner:
                     k = j + self.N_array[i-1]
                 elif i == 2:
                     k = j + self.N_array[i-1] + self.N_array[i-2]
-                # self.model.update_inertia(p_left_front[:,k], p_left_rear[:,k], p_right_front[:,k], p_right_rear[:,k])
+                self.model.update_inertia(p_left_front[:,k], p_left_rear[:,k], p_right_front[:,k], p_right_rear[:,k])
                 self.rd[:,k], self.qd[:,k], self.Hd[:,k], self.Ld[:,k] = self.model.dynamics(self.r[:, k], self.q[:, k], self.H[:, k], self.L[:, k],
                                                      f1[:, k], f2[:, k], f3[:, k], f4[:, k], p_left_front[:,k], p_right_front[:,k], p_left_rear[:,k], p_right_rear[:,k])
                 self.opti.subject_to(self.r[:, k + 1] == self.r[:, k] + self.rd[:,k] * self.dt[i])
@@ -226,7 +228,7 @@ class MotionPlanner:
             self.opti.subject_to(sumsqr(self.q[:, k]) >= 0.99)
             self.opti.subject_to(sumsqr(self.q[:, k]) <= 1.01)
         for j in range(3):
-            self.opti.subject_to(self.dt[j] >= 0.03)
+            self.opti.subject_to(self.dt[j] >= 0.025)
             self.opti.subject_to(self.dt[j] <= 0.15)
 
         # constraints on contact positions
@@ -253,8 +255,11 @@ class MotionPlanner:
             self.opti.subject_to(self.r[2, k] - p_left_rear[2, k] <= 0.56)
             self.opti.subject_to(self.r[2, k] - p_right_front[2, k] <= 0.56)
             self.opti.subject_to(self.r[2, k] - p_right_rear[2, k] <= 0.56)
+            self.opti.subject_to(p_left_front[2, k] >= 0)
+            self.opti.subject_to(p_left_rear[2, k] >= 0)
+            self.opti.subject_to(p_right_front[2, k] >= 0)
+            self.opti.subject_to(p_right_rear[2, k] >= 0)
 
-            # self.opti.subject_to(self.r[2, k] > 0.1)
             if k < self.N1:
                 self.opti.subject_to(p_left_front[:,k] == self.p_left_front_init)
                 self.opti.subject_to(p_left_rear[:,k] == self.p_left_rear_init)
@@ -371,6 +376,22 @@ class MotionPlanner:
         self.opti.set_initial(p_right_front, p_right_front_initialize)
         self.opti.set_initial(p_left_rear, p_left_rear_initialize)
         self.opti.set_initial(p_right_rear, p_right_rear_initialize)
+
+        # Optimization costs
+        # unit_quaternion_cost = 0
+        # for k in range(self.N):
+        #     unit_quaternion_cost += sumsqr(q[:, k])-1
+        # costs = sumsqr(f)
+        # costs = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(self.rd) \
+        #         + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(f5.T)) + sumsqr(diff(f6.T)) + sumsqr(diff(f7.T)) + sumsqr(diff(f8.T)) \
+        #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
+        ang_vel_final = angular_vel_quaterion_derivative(self.q[:,-1], self.qd[:,-1])
+        ang_vel_final_2 = angular_vel_quaterion_derivative(self.q[:,-2], self.qd[:,-2])
+        q_fin_cost = 200*sumsqr(self.q[:, (self.N1+self.N2+self.N3-10):] - self.q_final)# + 100*sumsqr(ang_vel_final+ang_vel_final_2)
+        effort_cost =  sumsqr(diff(self.H.T)) + 100*sumsqr(diff(self.L.T))+ sumsqr(self.H) + 100*sumsqr(self.L) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) \
+                + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + 10*(sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
+                + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T)))#+ 10*sumsqr(self.qd) ## sumsqr(self.r) + sumsqr(self.rd) +
+        self.opti.minimize(1e-4*effort_cost+q_fin_cost)
 
         options = {"ipopt.max_iter": 10000, "ipopt.warm_start_init_point": "yes", "ipopt.hessian_approximation": "exact"}
         # "verbose": True, "ipopt.print_level": 0, "print_out": False, "print_in": False, "print_time": False,"ipopt.hessian_approximation": "limited-memory",
@@ -669,8 +690,10 @@ class MotionPlanner:
         dt_plot[self.N1:self.N1+self.N2] *= dt[1]
         dt_plot[self.N1+self.N2:] *= dt[2]
         rpy = np.zeros((3, self.NX))
+        ang_vel = np.zeros((3, self.NX))
         for i in range(self.NX):
             rpy[0, i], rpy[1, i], rpy[2, i] = euler_from_quaternion(q[:, i])
+            ang_vel[:, i] = angular_vel_quaterion_derivative_numerical(q[:, i], qd[:, i])
         for i in range(1, self.NX):
             dt_plot[i] += dt_plot[i - 1]
 
@@ -699,9 +722,9 @@ class MotionPlanner:
         axs[0][0].plot(dt_plot, rd.T)
         axs[0][0].legend(['drx', 'dry', 'drz'])
 
-        axs[0][1].plot(dt_plot, qd.T)
-        axs[0][1].plot(np.linalg.norm(qd, axis=0))
-        axs[0][1].legend(['dqx', 'dqy', 'dqz', 'dqw', 'norm'])
+        axs[0][1].plot(dt_plot, ang_vel.T)
+        # axs[0][1].plot(np.linalg.norm(qd, axis=0))
+        axs[0][1].legend(['wx', 'wy', 'wz'])
 
         axs[1][0].plot(dt_plot, Hd.T)
         axs[1][0].legend(['dHx', 'dHy', 'dHz'])
@@ -765,9 +788,9 @@ class MotionPlanner:
         # ax.plot(p2_value_x, p2_value_y, p2_value_z)
         # ax.plot(p3_value_x, p3_value_y, p3_value_z)
         ax.plot3D(p1[0,:].T, p1[1,:].T, p1[2,:].T, 'gray')
-        ax.plot3D(p2[0,:].T, p2[1,:].T, p2[2,:].T, 'gray')
-        ax.plot3D(p3[0,:].T, p3[1,:].T, p3[2,:].T, 'gray')
-        ax.plot3D(p4[0,:].T, p4[1,:].T, p4[2,:].T, 'gray')
+        # ax.plot3D(p2[0,:].T, p2[1,:].T, p2[2,:].T, 'gray')
+        # ax.plot3D(p3[0,:].T, p3[1,:].T, p3[2,:].T, 'gray')
+        # ax.plot3D(p4[0,:].T, p4[1,:].T, p4[2,:].T, 'gray')
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_zlabel('z')
