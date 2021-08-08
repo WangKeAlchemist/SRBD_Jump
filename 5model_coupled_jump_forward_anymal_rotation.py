@@ -2,8 +2,7 @@ import numpy as np
 from casadi import *
 import utils.transformations as tf
 import matplotlib.pyplot as plt
-# from mpl_toolkits.mplot3d import Axes3D
-from utils.polynomial import *
+from utils.transformations import euler_from_quaternion, quaternion_slerp
 from mpl_toolkits import mplot3d
 from scipy.interpolate import interp1d
 
@@ -101,7 +100,7 @@ class MotionPlanner:
         self.r_init = np.array([0.0, 0.0, 0.468])
         self.r_final = np.array([0.0, 0.0, 0.468])
         self.q_init = np.array([0,0,0,1])
-        self.q_final = tf.quaternion_from_euler(0, 0, np.pi/6)
+        self.q_final = tf.quaternion_from_euler(0, 0, np.pi/2)
         R = self.quaternion_to_rotation_matrix(self.q_final)
         self.p_left_front_init = np.array([x_default, y_default, 0.0])
         self.p_right_front_init = np.array([x_default, -y_default, 0.0])
@@ -181,7 +180,7 @@ class MotionPlanner:
         # costs = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(self.rd) \
         #         + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(f5.T)) + sumsqr(diff(f6.T)) + sumsqr(diff(f7.T)) + sumsqr(diff(f8.T)) \
         #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
-        q_fin_cost = sumsqr(self.q[:, (self.N1+self.N2):] - self.q_final) + sumsqr(self.qd[:, -1])
+        q_fin_cost = 10*sumsqr(self.q[:, (self.N1+self.N2):] - self.q_final) #+ sumsqr(self.qd[:, -1])
         effort_cost = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(self.rd) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) \
                 + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
                 + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T))
@@ -196,6 +195,7 @@ class MotionPlanner:
                     k = j + self.N_array[i-1]
                 elif i == 2:
                     k = j + self.N_array[i-1] + self.N_array[i-2]
+                # to speed up, use guess
                 self.rd[:,k], self.qd[:,k], self.Hd[:,k], self.Ld[:,k] = self.model.dynamics(self.r[:, k], self.q[:, k], self.H[:, k], self.L[:, k],
                                                      f1[:, k], f2[:, k], f3[:, k], f4[:, k], p1_guess[:,k], p2_guess[:,k], p3_guess[:,k], p4_guess[:,k])
                 self.opti.subject_to(self.r[:, k + 1] == self.r[:, k] + self.rd[:,k] * self.dt[i])
@@ -354,6 +354,11 @@ class MotionPlanner:
         self.opti.set_initial(p_left_rear, p_left_rear_initialize)
         self.opti.set_initial(p_right_rear, p_right_rear_initialize)
 
+        q_i = np.zeros((4, self.NX))
+        for i in range(self.NU):
+            q_i[:,i] = quaternion_slerp(self.q_init, self.q_final, float(i/self.NU))
+        self.opti.set_initial(self.q, q_i)
+
         options = {"ipopt.max_iter": 10000, "ipopt.warm_start_init_point": "yes"}
         # "verbose": True, "ipopt.print_level": 0, "print_out": False, "print_in": False, "print_time": False,"ipopt.hessian_approximation": "limited-memory",
         self.opti.solver("ipopt", options)
@@ -379,9 +384,9 @@ class MotionPlanner:
                   solution.value(p_left_rear),
                   solution.value(p_right_rear))
 
-        self.trajectory_generation(solution.value(self.r),solution.value(self.rd), solution.value(self.q),solution.value(self.qd), solution.value(self.dt), solution.value(self.Hd),\
-                                solution.value(self.L), solution.value(self.Ld), solution.value(p_left_front), solution.value(p_right_front), solution.value(p_left_rear),\
-                                solution.value(p_right_rear), solution.value(f1), solution.value(f2), solution.value(f3), solution.value(f4), 400)
+        # self.trajectory_generation(solution.value(self.r),solution.value(self.rd), solution.value(self.q),solution.value(self.qd), solution.value(self.dt), solution.value(self.Hd),\
+        #                         solution.value(self.L), solution.value(self.Ld), solution.value(p_left_front), solution.value(p_right_front), solution.value(p_left_rear),\
+        #                         solution.value(p_right_rear), solution.value(f1), solution.value(f2), solution.value(f3), solution.value(f4), 400)
 
     def set_initial_solution(self):
         # dT_i = np.ones((1, 3)) * 0.025
@@ -650,6 +655,10 @@ class MotionPlanner:
         dt_plot[1:self.N1] *= dt[0]
         dt_plot[self.N1:self.N1+self.N2] *= dt[1]
         dt_plot[self.N1+self.N2:] *= dt[2]
+        rpy = np.zeros((3, self.NX))
+        for i in range(self.NX):
+            rpy[0, i], rpy[1, i], rpy[2, i] = euler_from_quaternion(q[:, i])
+
         for i in range(1, self.NX):
             dt_plot[i] += dt_plot[i - 1]
 
@@ -659,9 +668,9 @@ class MotionPlanner:
         axs[0][0].plot(dt_plot, r.T)
         axs[0][0].legend(['rx', 'ry', 'rz'])
 
-        axs[0][1].plot(dt_plot, q.T)
+        axs[0][1].plot(dt_plot, rpy.T)
         # axs[0][1].plot(np.linalg.norm(q, axis=0))
-        axs[0][1].legend(['qx', 'qy', 'qz', 'qw'])
+        axs[0][1].legend(['r', 'p', 'y'])
 
         axs[1][0].plot(dt_plot, H.T)
         axs[1][0].legend(['Hx', 'Hy', 'Hz'])
