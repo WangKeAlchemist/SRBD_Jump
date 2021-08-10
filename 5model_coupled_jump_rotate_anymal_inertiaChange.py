@@ -66,6 +66,7 @@ class SingleRigidBodyModel:
                        [0.,0.,1./((pos_lf[0]**2+pos_lh[0]**2+pos_rf[0]**2+pos_rh[0]**2+pos_lf[1]**2+pos_lh[1]**2+pos_rf[1]**2+pos_rh[1]**2)*self.leg_mass+1.77593)]])
 
 
+
     # dynamics for standing
     def dynamics(self, r, q, H, L, f1, f2, f3, f4, p1, p2, p3, p4):
         rd = H / self.mass
@@ -117,8 +118,8 @@ class MotionPlanner:
         self.T = T
         # jump forward with 0.1m, N1=N2=N3=20, tmin=0.02, tmax=0.15
         # jump hopping: N1=N2=N3=15 , tmin=0.02, tmax=0.15
-        self.N1 = 15
-        self.N2 = 20
+        self.N1 = 10
+        self.N2 = 25
         self.N3 = 20
         self.N_array = np.array([self.N1, self.N2, self.N3])
         self.N = self.N1 + self.N2 + self.N3
@@ -129,11 +130,15 @@ class MotionPlanner:
         x_default = 0.348
         y_default = 0.215
         z_default = 0.468
-        self.final_offset = np.array([0.5, 0.0, 0.0])
+        mu = 0.7
+        z_max = 376
+        x_max = z_max*mu/sqrt(2)
+        y_max = z_max*mu/sqrt(2)
+        self.final_offset = np.array([0.0, 0.0, 0.0])
         self.r_init = np.array([0.0, 0.0, z_default])
         self.r_final = np.array([0.0, 0.0, z_default]) + self.final_offset
         self.q_init = np.array([0,0,0,1])
-        self.q_final = tf.quaternion_from_euler(0, 0, 0)
+        self.q_final = tf.quaternion_from_euler(0, 0, 2*np.pi/3)
         R = self.quaternion_to_rotation_matrix(self.q_final)
         self.p_left_front_init = np.array([x_default, y_default, 0.0])
         self.p_right_front_init = np.array([x_default, -y_default, 0.0])
@@ -211,7 +216,7 @@ class MotionPlanner:
                     k = j + self.N_array[i-1]
                 elif i == 2:
                     k = j + self.N_array[i-1] + self.N_array[i-2]
-                # self.model.update_inertia(p_left_front[:,k], p_left_rear[:,k], p_right_front[:,k], p_right_rear[:,k])
+                self.model.update_inertia(p_left_front[:,k], p_left_rear[:,k], p_right_front[:,k], p_right_rear[:,k])
                 self.rd[:,k], self.qd[:,k], self.Hd[:,k], self.Ld[:,k] = self.model.dynamics(self.r[:, k], self.q[:, k], self.H[:, k], self.L[:, k],
                                                      f1[:, k], f2[:, k], f3[:, k], f4[:, k], p1_guess[:,k], p2_guess[:,k], p3_guess[:,k], p4_guess[:,k])
                 self.opti.subject_to(self.r[:, k + 1] == self.r[:, k] + self.rd[:,k] * self.dt[i])
@@ -224,7 +229,7 @@ class MotionPlanner:
             self.opti.subject_to(sumsqr(self.q[:, k]) >= 0.99)
             self.opti.subject_to(sumsqr(self.q[:, k]) <= 1.01)
         for j in range(3):
-            self.opti.subject_to(self.dt[j] >= 0.025)
+            self.opti.subject_to(self.dt[j] >= 0.015)
             self.opti.subject_to(self.dt[j] <= 0.15)
 
         # constraints on contact positions
@@ -251,6 +256,26 @@ class MotionPlanner:
             self.opti.subject_to(p_left_rear[2, k] >= 0)
             self.opti.subject_to(p_right_front[2, k] >= 0)
             self.opti.subject_to(p_right_rear[2, k] >= 0)
+            self.opti.subject_to(f1[2,k] <= z_max)
+            self.opti.subject_to(f2[2,k] <= z_max)
+            self.opti.subject_to(f3[2,k] <= z_max)
+            self.opti.subject_to(f4[2,k] <= z_max)
+            self.opti.subject_to(f1[1,k] <= y_max)
+            self.opti.subject_to(f2[1,k] <= y_max)
+            self.opti.subject_to(f3[1,k] <= y_max)
+            self.opti.subject_to(f4[1,k] <= y_max)
+            self.opti.subject_to(f1[1,k] >= -y_max)
+            self.opti.subject_to(f2[1,k] >= -y_max)
+            self.opti.subject_to(f3[1,k] >= -y_max)
+            self.opti.subject_to(f4[1,k] >= -y_max)
+            self.opti.subject_to(f1[0,k] <= x_max)
+            self.opti.subject_to(f2[0,k] <= x_max)
+            self.opti.subject_to(f3[0,k] <= x_max)
+            self.opti.subject_to(f4[0,k] <= x_max)
+            self.opti.subject_to(f1[0,k] >= -x_max)
+            self.opti.subject_to(f2[0,k] >= -x_max)
+            self.opti.subject_to(f3[0,k] >= -x_max)
+            self.opti.subject_to(f4[0,k] >= -x_max)
 
             if k < self.N1:
                 self.opti.subject_to(p_left_front[:,k] == self.p_left_front_init)
@@ -383,15 +408,17 @@ class MotionPlanner:
         # costs = sumsqr(diff(self.H.T)) + sumsqr(diff(self.L.T)) + 5*sumsqr(self.r) + sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(self.rd) \
         #         + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + sumsqr(diff(f5.T)) + sumsqr(diff(f6.T)) + sumsqr(diff(f7.T)) + sumsqr(diff(f8.T)) \
         #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
-        q_fin_cost = 50*sumsqr(self.q[:,-3:-1]-q_i[:,-3:-1])#+1*sumsqr(self.q[:, :-1] - q_i[:, :-1])# + + 100*sumsqr(ang_vel_final+ang_vel_final_2)
-        effort_cost = sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + 0.05*(sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
-                + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T)))+sumsqr(diff(self.H.T))+ 2*sumsqr(self.L) #- 1000*sumsqr(self.qd[:,self.N1:self.N1+self.N2])#+ + 10*sumsqr(self.qd) ## sumsqr(self.r) + sumsqr(self.rd) ++ sumsqr(self.H)
-        # for i in range(self.N2):
-        #     ang_vel = angular_vel_quaterion_derivative(self.q[:,self.N1+i], self.qd[:,self.N1+i])
-        #     effort_cost += 0.2*ang_vel[1]
-        self.opti.minimize(1e-4*effort_cost+q_fin_cost)
+        ang_vel_final = angular_vel_quaterion_derivative(self.q[:,-1], self.qd[:,-1])
+        ang_vel_final_2 = angular_vel_quaterion_derivative(self.q[:,-2], self.qd[:,-2])
+        q_fin_cost = 5*sumsqr(self.q[:,-2:]-q_i[:,-2:])#+1*sumsqr(self.q[:, :-1] - q_i[:, :-1])# + + 100*sumsqr(ang_vel_final+ang_vel_final_2)
+        effort_cost = sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + 20*(sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
+                + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T))) + 70000*(self.dt[0]*self.N1 + self.dt[1]*self.N2+ self.dt[2]*self.N3)#+sumsqr(diff(self.H.T))+ sumsqr(self.L) #- 1000*sumsqr(self.qd[:,self.N1:self.N1+self.N2])#+ + 10*sumsqr(self.qd) ## sumsqr(self.r) + sumsqr(self.rd) ++ sumsqr(self.H)
+        for i in range(self.N2):
+            ang_vel = angular_vel_quaterion_derivative(self.q[:,self.N1+i], self.qd[:,self.N1+i])
+            effort_cost -= 10*ang_vel[2]**2
+        self.opti.minimize(3e-4*effort_cost+q_fin_cost)
 
-        options = {"ipopt.max_iter": 2000, "ipopt.warm_start_init_point": "yes", "ipopt.hessian_approximation": "exact"}
+        options = {"ipopt.max_iter": 3000, "ipopt.warm_start_init_point": "yes", "ipopt.hessian_approximation": "exact"}
         # "verbose": True, "ipopt.print_level": 0, "print_out": False, "print_in": False, "print_time": False,"ipopt.hessian_approximation": "limited-memory",
         self.opti.solver("ipopt", options)
 
@@ -416,9 +443,9 @@ class MotionPlanner:
                   solution.value(p_left_rear),
                   solution.value(p_right_rear))
 
-        # self.trajectory_generation(solution.value(self.r),solution.value(self.rd), solution.value(self.q),solution.value(self.qd), solution.value(self.dt), solution.value(self.Hd),\
-        #                         solution.value(self.L), solution.value(self.Ld), solution.value(p_left_front), solution.value(p_right_front), solution.value(p_left_rear),\
-        #                         solution.value(p_right_rear), solution.value(f1), solution.value(f2), solution.value(f3), solution.value(f4), 400)
+        self.trajectory_generation(solution.value(self.r),solution.value(self.rd), solution.value(self.q),solution.value(self.qd), solution.value(self.dt), solution.value(self.Hd),\
+                                solution.value(self.L), solution.value(self.Ld), solution.value(p_left_front), solution.value(p_right_front), solution.value(p_left_rear),\
+                                solution.value(p_right_rear), solution.value(f1), solution.value(f2), solution.value(f3), solution.value(f4), 400)
 
     def set_initial_solution(self):
         # dT_i = np.ones((1, 3)) * 0.025
@@ -449,6 +476,7 @@ class MotionPlanner:
             ang_vel[:, i] = angular_vel_quaterion_derivative_numerical(q[:, i], qd[:, i])
         for i in range(1, self.NX):
             dt_plot[i] += dt_plot[i - 1]
+
         dt_plot_control = dt_plot[1:]
         p_left_front = np.concatenate((p_left_front, np.reshape(self.p_left_front_final, (3, 1))), axis=1)
         p_right_front = np.concatenate((p_right_front, np.reshape(self.p_right_front_final, (3, 1))), axis=1)
@@ -487,9 +515,9 @@ class MotionPlanner:
         comx = interp1d(dt_plot, r[0, :], kind='cubic')
         comy = interp1d(dt_plot, r[1, :], kind='cubic')
         comz = interp1d(dt_plot, r[2, :], kind='cubic')
-        comdx = interp1d(dt_plot, rd[0, :], kind='quadratic')
-        comdy = interp1d(dt_plot, rd[1, :], kind='quadratic')
-        comdz = interp1d(dt_plot, rd[2, :], kind='quadratic')
+        comdx = interp1d(dt_plot, ang_vel[0, :], kind='linear')
+        comdy = interp1d(dt_plot, ang_vel[1, :], kind='linear')
+        comdz = interp1d(dt_plot, ang_vel[2, :], kind='linear')
         comddx = interp1d(dt_plot, Hd[0, :] / self.model.mass, kind='linear')
         comddy = interp1d(dt_plot, Hd[1, :] / self.model.mass, kind='linear')
         comddz = interp1d(dt_plot, Hd[2, :] / self.model.mass, kind='linear')
@@ -497,9 +525,9 @@ class MotionPlanner:
         comqy = interp1d(dt_plot, q[1,:], kind='linear')
         comqz = interp1d(dt_plot, q[2,:], kind='linear')
         comqw = interp1d(dt_plot, q[3,:], kind='linear')
-        comdx = interp1d(dt_plot, ang_vel[0, :], kind='linear')
-        comdy = interp1d(dt_plot, ang_vel[1, :], kind='linear')
-        comdz = interp1d(dt_plot, ang_vel[2, :], kind='linear')
+        comdqx = interp1d(dt_plot, qd[0,:], kind='linear')
+        comdqy = interp1d(dt_plot, qd[1,:], kind='linear')
+        comdqz = interp1d(dt_plot, qd[2,:], kind='linear')
         angx = interp1d(dt_plot, L[0, :] / self.model.mass, kind='linear')
         angy = interp1d(dt_plot, L[1, :] / self.model.mass, kind='linear')
         angz = interp1d(dt_plot, L[2, :] / self.model.mass, kind='linear')
@@ -671,13 +699,13 @@ class MotionPlanner:
         # axs[0][1].plot(dt_plot)
         # axs[0][1].legend(['dt'])
 
-        plt.plot(sample_comqx)
-        plt.plot(sample_comqy)
-        plt.plot(sample_comqz)
-        plt.plot(sample_comqw)
-        plt.show()
+        # plt.plot(sample_comqx)
+        # plt.plot(sample_comqy)
+        # plt.plot(sample_comqz)
+        # plt.plot(sample_comqw)
+        # plt.show()
 
-        np.savez('/home/robin/Documents/anymal_control_msg_publisher/src/anymal_control_msg_publisher/scripts/data_test_forward.npz',
+        np.savez('/home/robin/Documents/anymal_msg_publisher/src/anymal_control_msg_publisher/scripts/data_test_rotate.npz',
             lfront=sample_lfrontFOOT, rfront=sample_rfrontFOOT, lrear=sample_lrearFOOT, \
             rrear=sample_rrearFOOT, lfront_vel=sample_lfrontFOOT_vel, rfront_vel=sample_rfrontFOOT_vel, lrear_vel=sample_lrearFOOT_vel, \
             rrear_vel=sample_rrearFOOT_vel, lfront_acc=sample_lfrontFOOT_acc, rfront_acc=sample_rfrontFOOT_acc, lrear_acc=sample_lrearFOOT_acc, \
@@ -726,7 +754,7 @@ class MotionPlanner:
         axs[0][1].plot(dt_plot, ang_vel.T)
         # axs[0][1].plot(np.linalg.norm(qd, axis=0))
         axs[0][1].legend(['wx', 'wy', 'wz'])
-        rpy_flight_yaw = ang_vel[1, self.N1:self.N1+self.N2]
+        rpy_flight_yaw = ang_vel[2, self.N1:self.N1+self.N2]
         print('The average velocity is ', np.mean(rpy_flight_yaw))
 
         axs[1][0].plot(dt_plot, Hd.T)
