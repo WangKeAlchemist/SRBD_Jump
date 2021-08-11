@@ -138,7 +138,7 @@ class MotionPlanner:
         self.r_init = np.array([0.0, 0.0, z_default])
         self.r_final = np.array([0.0, 0.0, z_default]) + self.final_offset
         self.q_init = np.array([0,0,0,1])
-        self.q_final = tf.quaternion_from_euler(0, 0, 2*np.pi/3)
+        self.q_final = tf.quaternion_from_euler(0, 0, np.pi/2)
         R = self.quaternion_to_rotation_matrix(self.q_final)
         self.p_left_front_init = np.array([x_default, y_default, 0.0])
         self.p_right_front_init = np.array([x_default, -y_default, 0.0])
@@ -410,7 +410,7 @@ class MotionPlanner:
         #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
         ang_vel_final = angular_vel_quaterion_derivative(self.q[:,-1], self.qd[:,-1])
         ang_vel_final_2 = angular_vel_quaterion_derivative(self.q[:,-2], self.qd[:,-2])
-        q_fin_cost = 5*sumsqr(self.q[:,-2:]-q_i[:,-2:])#+1*sumsqr(self.q[:, :-1] - q_i[:, :-1])# + + 100*sumsqr(ang_vel_final+ang_vel_final_2)
+        q_fin_cost = 25*sumsqr(self.q[:,-2:]-q_i[:,-2:])#+1*sumsqr(self.q[:, :-1] - q_i[:, :-1])# + + 100*sumsqr(ang_vel_final+ang_vel_final_2)
         effort_cost = sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + 20*(sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
                 + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T))) + 70000*(self.dt[0]*self.N1 + self.dt[1]*self.N2+ self.dt[2]*self.N3)#+sumsqr(diff(self.H.T))+ sumsqr(self.L) #- 1000*sumsqr(self.qd[:,self.N1:self.N1+self.N2])#+ + 10*sumsqr(self.qd) ## sumsqr(self.r) + sumsqr(self.rd) ++ sumsqr(self.H)
         for i in range(self.N2):
@@ -700,12 +700,12 @@ class MotionPlanner:
         # axs[0][1].legend(['dt'])
 
         # plt.plot(sample_comqx)
-        # plt.plot(sample_comqy)
+        # plt.plot(sample_comqy)e
         # plt.plot(sample_comqz)
         # plt.plot(sample_comqw)
         # plt.show()
 
-        np.savez('/home/robin/Documents/anymal_msg_publisher/src/anymal_control_msg_publisher/scripts/data_test_rotate.npz',
+        np.savez('/home/robin/Documents/anymal_msg_publisher/src/anymal_control_msg_publisher/scripts/data_test_rotate_inertiaChange.npz',
             lfront=sample_lfrontFOOT, rfront=sample_rfrontFOOT, lrear=sample_lrearFOOT, \
             rrear=sample_rrearFOOT, lfront_vel=sample_lfrontFOOT_vel, rfront_vel=sample_rfrontFOOT_vel, lrear_vel=sample_lrearFOOT_vel, \
             rrear_vel=sample_rrearFOOT_vel, lfront_acc=sample_lfrontFOOT_acc, rfront_acc=sample_rfrontFOOT_acc, lrear_acc=sample_lrearFOOT_acc, \
