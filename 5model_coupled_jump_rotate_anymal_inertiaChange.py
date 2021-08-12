@@ -120,7 +120,7 @@ class MotionPlanner:
         # jump hopping: N1=N2=N3=15 , tmin=0.02, tmax=0.15
         self.N1 = 10
         self.N2 = 25
-        self.N3 = 20
+        self.N3 = 20 # 25 for inertia change
         self.N_array = np.array([self.N1, self.N2, self.N3])
         self.N = self.N1 + self.N2 + self.N3
         self.NX = self.N + 1
@@ -216,9 +216,9 @@ class MotionPlanner:
                     k = j + self.N_array[i-1]
                 elif i == 2:
                     k = j + self.N_array[i-1] + self.N_array[i-2]
-                self.model.update_inertia(p_left_front[:,k], p_left_rear[:,k], p_right_front[:,k], p_right_rear[:,k])
+                # self.model.update_inertia(p_left_front[:,k], p_left_rear[:,k], p_right_front[:,k], p_right_rear[:,k])
                 self.rd[:,k], self.qd[:,k], self.Hd[:,k], self.Ld[:,k] = self.model.dynamics(self.r[:, k], self.q[:, k], self.H[:, k], self.L[:, k],
-                                                     f1[:, k], f2[:, k], f3[:, k], f4[:, k], p1_guess[:,k], p2_guess[:,k], p3_guess[:,k], p4_guess[:,k])
+                                                     f1[:, k], f2[:, k], f3[:, k], f4[:, k], p_left_front[:,k], p_right_front[:,k], p_left_rear[:,k], p_right_rear[:,k])
                 self.opti.subject_to(self.r[:, k + 1] == self.r[:, k] + self.rd[:,k] * self.dt[i])
                 self.opti.subject_to(self.q[:, k + 1] == self.q[:, k] + self.qd[:,k] * self.dt[i])
                 self.opti.subject_to(self.H[:, k + 1] == self.H[:, k] + self.Hd[:,k] * self.dt[i])
@@ -410,12 +410,12 @@ class MotionPlanner:
         #         + sumsqr(self.dt) + sumsqr(diff(p_left.T)) + sumsqr(diff(p_right.T))
         ang_vel_final = angular_vel_quaterion_derivative(self.q[:,-1], self.qd[:,-1])
         ang_vel_final_2 = angular_vel_quaterion_derivative(self.q[:,-2], self.qd[:,-2])
-        q_fin_cost = 25*sumsqr(self.q[:,-2:]-q_i[:,-2:])#+1*sumsqr(self.q[:, :-1] - q_i[:, :-1])# + + 100*sumsqr(ang_vel_final+ang_vel_final_2)
-        effort_cost = sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + 20*(sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
-                + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T))) + 70000*(self.dt[0]*self.N1 + self.dt[1]*self.N2+ self.dt[2]*self.N3)#+sumsqr(diff(self.H.T))+ sumsqr(self.L) #- 1000*sumsqr(self.qd[:,self.N1:self.N1+self.N2])#+ + 10*sumsqr(self.qd) ## sumsqr(self.r) + sumsqr(self.rd) ++ sumsqr(self.H)
+        q_fin_cost = 25*sumsqr(self.q[:,-3:]-self.q_final)#+1*sumsqr(self.q[:, :-1] - q_i[:, :-1])# + + 100*sumsqr(ang_vel_final+ang_vel_final_2)
+        effort_cost = sumsqr(diff(f1.T)) + sumsqr(diff(f2.T)) + sumsqr(diff(f3.T)) + sumsqr(diff(f4.T)) + 1000*(sumsqr(diff(p_left_front.T)) + sumsqr(diff(p_left_rear.T))\
+                + sumsqr(diff(p_right_front.T))+ sumsqr(diff(p_right_rear.T))) + 70000*(self.dt[0]*self.N1 + self.dt[1]*self.N2+self.dt[2]*self.N3) #+ 500000*self.dt[2]*self.N3#+sumsqr(diff(self.H.T))+ sumsqr(self.L) #- 1000*sumsqr(self.qd[:,self.N1:self.N1+self.N2])#+ + 10*sumsqr(self.qd) ## sumsqr(self.r) + sumsqr(self.rd) ++ sumsqr(self.H)
         for i in range(self.N2):
             ang_vel = angular_vel_quaterion_derivative(self.q[:,self.N1+i], self.qd[:,self.N1+i])
-            effort_cost -= 10*ang_vel[2]**2
+            effort_cost -= 0.2*ang_vel[2]**2 # 0.15
         self.opti.minimize(3e-4*effort_cost+q_fin_cost)
 
         options = {"ipopt.max_iter": 3000, "ipopt.warm_start_init_point": "yes", "ipopt.hessian_approximation": "exact"}
@@ -705,7 +705,7 @@ class MotionPlanner:
         # plt.plot(sample_comqw)
         # plt.show()
 
-        np.savez('/home/robin/Documents/anymal_msg_publisher/src/anymal_control_msg_publisher/scripts/data_test_rotate_inertiaChange.npz',
+        np.savez('/home/robin/Documents/anymal_msg_publisher/src/anymal_control_msg_publisher/scripts/data_test_rotate.npz',
             lfront=sample_lfrontFOOT, rfront=sample_rfrontFOOT, lrear=sample_lrearFOOT, \
             rrear=sample_rrearFOOT, lfront_vel=sample_lfrontFOOT_vel, rfront_vel=sample_rfrontFOOT_vel, lrear_vel=sample_lrearFOOT_vel, \
             rrear_vel=sample_rrearFOOT_vel, lfront_acc=sample_lfrontFOOT_acc, rfront_acc=sample_rfrontFOOT_acc, lrear_acc=sample_lrearFOOT_acc, \

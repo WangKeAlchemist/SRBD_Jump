@@ -213,7 +213,7 @@ class MotionPlanner:
                     k = j + self.N_array[i-1] + self.N_array[i-2]
                 # self.model.update_inertia(p_left_front[:,k], p_left_rear[:,k], p_right_front[:,k], p_right_rear[:,k])
                 self.rd[:,k], self.qd[:,k], self.Hd[:,k], self.Ld[:,k] = self.model.dynamics(self.r[:, k], self.q[:, k], self.H[:, k], self.L[:, k],
-                                                     f1[:, k], f2[:, k], f3[:, k], f4[:, k], p1_guess[:,k], p2_guess[:,k], p3_guess[:,k], p4_guess[:,k])
+                                                     f1[:, k], f2[:, k], f3[:, k], f4[:, k], p_left_front[:,k], p_right_front[:,k], p_left_front[:,k], p_right_rear[:,k])
                 self.opti.subject_to(self.r[:, k + 1] == self.r[:, k] + self.rd[:,k] * self.dt[i])
                 self.opti.subject_to(self.q[:, k + 1] == self.q[:, k] + self.qd[:,k] * self.dt[i])
                 self.opti.subject_to(self.H[:, k + 1] == self.H[:, k] + self.Hd[:,k] * self.dt[i])
